@@ -174,7 +174,7 @@ def parse_block(date_str: str, block: str) -> dict:
 
     # ── session type ──────────────────────────────────────────────────────────
     first_line = block.split('\n')[0]
-    code_m = re.search(r'Start time:\s*\d+:\d+\s+([A-Z]+)\s*-', first_line)
+    code_m = re.search(r'Start time:\s*\d+:\d+\s+([A-Za-z]+)\s*-', first_line)
     session_type = SESSION_CODE_MAP.get(code_m.group(1), '') if code_m else ''
 
     # ── progress code & service location ──────────────────────────────────────
@@ -193,8 +193,9 @@ def parse_block(date_str: str, block: str) -> dict:
     # ── goal ──────────────────────────────────────────────────────────────────
     goal_m = re.search(r'Goal:\s*(.*?)(?=Description:|$)', block, re.DOTALL | re.IGNORECASE)
     goal   = re.sub(r'\s+', ' ', goal_m.group(1)).strip() if goal_m else ''
-    goal   = re.sub(r'^pm\s*', '', goal, flags=re.IGNORECASE).strip()
     goal   = re.sub(r'\b\d{2}/\d{2}/\d{4}\b', '', goal).strip()
+    goal   = re.sub(r'^End time:\s*\d+:\d+\s*', '', goal, flags=re.IGNORECASE).strip()
+    goal   = re.sub(r'^(?:am|pm)\s*', '', goal, flags=re.IGNORECASE).strip()
     goal   = re.sub(r'Student Name:.*', '', goal, flags=re.IGNORECASE).strip()
 
     # ── actual description ────────────────────────────────────────────────────
@@ -203,7 +204,8 @@ def parse_block(date_str: str, block: str) -> dict:
     for stop_pat in (r'Date\s+Length of Session', r'Service Description:', r'Progress Code:'):
         desc = re.split(stop_pat, desc, flags=re.IGNORECASE)[0].strip()
     desc = re.sub(r'\b\d{2}/\d{2}/\d{4}\b', '', desc).strip()
-    desc = re.sub(r'^pm\s*', '', desc, flags=re.IGNORECASE).strip()
+    desc = re.sub(r'^\d+:\d+(?:\s*(?:am|pm))?(?:\s*-\s*\d+:\d+(?:\s*(?:am|pm))?)?\s*', '', desc, flags=re.IGNORECASE).strip()
+    desc = re.sub(r'^(?:am|pm)\s*', '', desc, flags=re.IGNORECASE).strip()
     desc = re.sub(r'Student Name:.*', '', desc, flags=re.IGNORECASE).strip()
 
     return {
@@ -229,7 +231,7 @@ def parse_pdf(pdf_path: Path) -> tuple[list[dict], dict]:
     seen: set = set()
     for date_str, block in blocks:
         entry = parse_block(date_str, block)
-        key   = (date_str, entry['session_type'][:20], entry['goal'][:40])
+        key   = (date_str, entry['start_time'], entry['session_type'][:20], entry['goal'][:40])
         if key in seen:
             continue
         seen.add(key)
@@ -267,20 +269,21 @@ def build_dataframes(
 
     df['time'] = df.apply(fmt_time, axis=1)
 
-    df['progress_code']    = df['progress_code'].apply(   lambda x: x if x else '(BLANK)')
-    df['service_location'] = df['service_location'].apply(lambda x: x if x else '(BLANK)')
-    df['goal']             = df['goal'].apply(            lambda x: x if x else '(BLANK)')
+    df['progress_code']      = df['progress_code'].apply(      lambda x: x if x else '(LEFT BLANK)')
+    df['service_location']   = df['service_location'].apply(   lambda x: x if x else '(LEFT BLANK)')
+    df['goal']               = df['goal'].apply(               lambda x: x if x else '(LEFT BLANK)')
+    df['actual_description'] = df['actual_description'].apply( lambda x: x if x else '(LEFT BLANK)')
     df['goal_category']    = df['goal'].apply(goal_category)
     df['date_str']         = df['date'].dt.strftime('%m/%d/%Y')
 
     # ── main log ──────────────────────────────────────────────────────────────
     main_df = df[[
-        'child_name', 'date_str', 'day_of_week', 'week_monday',
+        'child_name', 'week_monday', 'date_str', 'day_of_week',
         'time', 'session_type', 'goal', 'actual_description',
         'progress_code', 'service_location', 'goal_category',
     ]].copy()
     main_df.columns = [
-        'Child Name', 'Date of Service', 'Day of Week', 'Week of (Monday)',
+        'Child Name', 'Week of (Monday)', 'Date of Service', 'Day of Week',
         'Time', 'Session Type', 'Goal', 'Actual Description',
         'Progress Code', 'Service Location', 'Goal Category',
     ]
@@ -454,7 +457,10 @@ def main():
             .reset_index(drop=True)
         )
 
-        combined_stem = out_folder / 'combined_cleaned'
+        child_name = combined_main['Child Name'].iloc[0] if 'Child Name' in combined_main.columns and len(combined_main) else 'unknown'
+        safe_name = re.sub(r'[^\w\s-]', '', child_name).strip().replace(' ', '_')
+        today = datetime.today().strftime('%Y-%m-%d')
+        combined_stem = out_folder / f'{safe_name}_combined_{today}'
         xlsx, log_xlsx, csv = save_outputs(combined_main, combined_log, combined_stem)
 
         print(f'  Combined Main Excel : {xlsx.name}')
