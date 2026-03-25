@@ -3,27 +3,26 @@
 Parse speech therapy log PDFs and reorganize into clean Excel files.
 
 Per-file outputs (one set per PDF):
-  <pdf_name>_cleaned.xlsx  — full log, color-coded by goal
-  <pdf_name>_log.xlsx      — date of service + provider electronic signature only
+  out/<pdf_name>_cleaned.xlsx  — full log, color-coded by goal
 
-Combined outputs (all PDFs in INPUT_FOLDER merged, sorted by date):
-  combined_cleaned.xlsx
-  combined_log.xlsx
+Combined outputs (all PDFs merged, sorted by date):
+  out/combined_cleaned.xlsx
+
+Input PDFs go in:  <script_dir>/in/
+Outputs are written to: <script_dir>/out/
 
 Requirements: pip install pdfplumber pandas openpyxl
-Usage: python parse_speech_logs.py   (uses INPUT_FOLDER below)
-       python parse_speech_logs.py /path/to/folder   (overrides INPUT_FOLDER)
+Usage: python parse_speech_logs.py         (uses in/ next to this script)
+       python parse_speech_logs.py /path/  (overrides input folder)
 """
-
-# ── configuration ──────────────────────────────────────────────────────────────
-# Folder containing all PDFs to process. All PDFs must be for the same child.
-# Change this to point at any child's folder before running.
-
-INPUT_FOLDER = "."
 
 import re
 import sys
 from pathlib import Path
+
+_SCRIPT_DIR  = Path(__file__).parent
+INPUT_FOLDER = _SCRIPT_DIR / 'in'
+OUTPUT_FOLDER = _SCRIPT_DIR / 'out'
 from datetime import datetime, timedelta
 
 import pdfplumber
@@ -396,18 +395,22 @@ def save_outputs(
 # ── entry point ────────────────────────────────────────────────────────────────
 
 def main():
-    folder = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(INPUT_FOLDER)
+    in_folder  = Path(sys.argv[1]) if len(sys.argv) > 1 else INPUT_FOLDER
+    out_folder = Path(sys.argv[2]) if len(sys.argv) > 2 else OUTPUT_FOLDER
 
-    if not folder.exists():
-        print(f'Error: folder not found: {folder}')
+    if not in_folder.exists():
+        print(f'Error: input folder not found: {in_folder}')
         sys.exit(1)
 
-    pdf_files = sorted(folder.glob('*.pdf'))
+    out_folder.mkdir(parents=True, exist_ok=True)
+
+    pdf_files = sorted(in_folder.glob('*.pdf'))
     if not pdf_files:
-        print(f'Error: no PDF files found in {folder}')
+        print(f'Error: no PDF files found in {in_folder}')
         sys.exit(1)
 
-    print(f'Found {len(pdf_files)} PDF(s) in {folder.resolve()}\n')
+    print(f'Found {len(pdf_files)} PDF(s) in {in_folder.resolve()}')
+    print(f'Outputs -> {out_folder.resolve()}\n')
 
     all_main_dfs: list[pd.DataFrame] = []
     all_log_dfs:  list[pd.DataFrame] = []
@@ -421,7 +424,7 @@ def main():
 
         main_df, log_df = build_dataframes(entries, header['student_name'])
 
-        stem = pdf_path.with_name(pdf_path.stem + '_cleaned')
+        stem = out_folder / (pdf_path.stem + '_cleaned')
         xlsx, log_xlsx, csv = save_outputs(main_df, log_df, stem)
 
         print(f'  Main Excel : {xlsx.name}')
@@ -451,7 +454,7 @@ def main():
             .reset_index(drop=True)
         )
 
-        combined_stem = folder / 'combined_cleaned'
+        combined_stem = out_folder / 'combined_cleaned'
         xlsx, log_xlsx, csv = save_outputs(combined_main, combined_log, combined_stem)
 
         print(f'  Combined Main Excel : {xlsx.name}')
