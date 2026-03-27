@@ -278,12 +278,15 @@ def build_dataframes(
 
     # ── main log ──────────────────────────────────────────────────────────────
     main_df = df[[
-        'child_name', 'week_monday', 'date_str', 'day_of_week',
+        'child_name', 'week_monday', 'date_str', 'provider_sig_date',
+        'day_of_week',
         'time', 'session_type', 'goal', 'actual_description',
         'progress_code', 'service_location', 'goal_category',
     ]].copy()
     main_df.columns = [
-        'Child Name', 'Week of (Monday)', 'Date of Service', 'Day of Week',
+        'Child Name', 'Week of (Monday)', 'Date of Service',
+        'Provider Electronic Signature',
+        'Day of Week',
         'Time', 'Session Type', 'Goal', 'Actual Description',
         'Progress Code', 'Service Location', 'Goal Category',
     ]
@@ -301,6 +304,7 @@ def build_dataframes(
 _MAIN_COL_WIDTHS = {
     'Child Name':         18,
     'Date of Service':    15,
+    'Provider Electronic Signature': 28,
     'Day of Week':        13,
     'Week of (Monday)':   17,
     'Time':               30,
