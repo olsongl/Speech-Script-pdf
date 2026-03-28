@@ -85,6 +85,68 @@ def monday_of_week(date: datetime) -> str:
     return (date - timedelta(days=date.weekday())).strftime('%m/%d/%Y')
 
 
+# ── missing-session gap detection ─────────────────────────────────────────────
+
+def _fill_missing_weeks(df: pd.DataFrame) -> pd.DataFrame:
+    """For a single-child dataframe, insert placeholder rows for missing sessions.
+
+    Every week between the first and last Monday in the data should have
+    exactly 2 session rows.  Weeks with fewer get empty placeholder rows
+    that contain only the 'Week of (Monday)' value.
+    """
+    if df.empty:
+        return df
+
+    monday_strs = df['Week of (Monday)'].unique()
+    monday_dates = sorted(datetime.strptime(m, '%m/%d/%Y') for m in monday_strs)
+
+    if not monday_dates:
+        return df
+
+    # every Monday from first to last
+    all_mondays: list[datetime] = []
+    cur = monday_dates[0]
+    while cur <= monday_dates[-1]:
+        all_mondays.append(cur)
+        cur += timedelta(days=7)
+
+    result_rows: list[dict] = []
+    for monday in all_mondays:
+        ms = monday.strftime('%m/%d/%Y')
+        week = df[df['Week of (Monday)'] == ms]
+
+        # existing rows first
+        for _, row in week.iterrows():
+            result_rows.append(row.to_dict())
+
+        # placeholder rows for missing sessions (expect 2 per week)
+        for _ in range(max(0, 2 - len(week))):
+            placeholder = {col: '' for col in df.columns}
+            placeholder['Week of (Monday)'] = ms
+            result_rows.append(placeholder)
+
+    return pd.DataFrame(result_rows, columns=df.columns)
+
+
+def insert_missing_session_rows(main_df: pd.DataFrame) -> pd.DataFrame:
+    """Insert placeholder rows so every week between first and last has 2 entries.
+
+    Handles multiple children by processing each independently.
+    """
+    if main_df.empty:
+        return main_df
+
+    children = [c for c in main_df['Child Name'].dropna().unique() if c]
+    if not children:
+        return main_df
+
+    parts = [
+        _fill_missing_weeks(main_df[main_df['Child Name'] == child].copy())
+        for child in children
+    ]
+    return pd.concat(parts, ignore_index=True)
+
+
 # ── text cleanup ───────────────────────────────────────────────────────────────
 
 _URL  = re.compile(r'https?://\S+\s*\d*/?\d*', re.IGNORECASE)
@@ -431,15 +493,17 @@ def main():
 
         main_df, log_df = build_dataframes(entries, header['student_name'])
 
+        main_df_gapped = insert_missing_session_rows(main_df)
         stem = out_folder / (pdf_path.stem + '_cleaned')
-        xlsx, log_xlsx, csv = save_outputs(main_df, log_df, stem)
+        xlsx, log_xlsx, csv = save_outputs(main_df_gapped, log_df, stem)
 
-        print(f'  Main Excel : {xlsx.name}')
+        added = len(main_df_gapped) - len(main_df)
+        print(f'  Main Excel : {xlsx.name}  ({added} placeholder rows added)')
         print(f'  Log Excel  : {log_xlsx.name}')
         print(f'  CSV        : {csv.name}')
         print()
 
-        all_main_dfs.append(main_df)
+        all_main_dfs.append(main_df)      # originals for combining
         all_log_dfs.append(log_df)
 
     # ── combined outputs ───────────────────────────────────────────────────────
@@ -461,6 +525,9 @@ def main():
             .reset_index(drop=True)
         )
 
+        orig_len = len(combined_main)
+        combined_main = insert_missing_session_rows(combined_main)
+
         child_name = combined_main['Child Name'].iloc[0] if 'Child Name' in combined_main.columns and len(combined_main) else 'unknown'
         safe_name = re.sub(r'[^\w\s-]', '', child_name).strip().replace(' ', '_')
         today = datetime.today().strftime('%Y-%m-%d')
@@ -470,7 +537,7 @@ def main():
         print(f'  Combined Main Excel : {xlsx.name}')
         print(f'  Combined Log Excel  : {log_xlsx.name}')
         print(f'  Combined CSV        : {csv.name}')
-        print(f'  Total entries       : {len(combined_main)}')
+        print(f'  Total entries       : {len(combined_main)}  ({len(combined_main) - orig_len} placeholder rows)')
         print()
 
 
